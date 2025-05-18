@@ -8,6 +8,7 @@ DB_FILE = "users.db"
 REFERRAL_CODE = "аренда11"
 QUEUE_LIMIT = 3
 NOTIFY_POSITION = 3
+PAGE_SIZE = 5
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
