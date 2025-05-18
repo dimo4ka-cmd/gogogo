@@ -16,6 +16,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_error_handler(error_handler)
 
+    logger.info("Starting payout bot")
     app.run_polling()
 
 if __name__ == "__main__":
