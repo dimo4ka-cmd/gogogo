@@ -1,3 +1,5 @@
+import os
+import psutil
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from config import BOT_TOKEN, DB_FILE, logger
 from handlers import start, handle_message, show_user_panel, button_handler, show_admin_panel
@@ -5,7 +7,20 @@ from handlers import start, handle_message, show_user_panel, button_handler, sho
 async def error_handler(update, context):
     logger.error(f"Update {update} caused error {context.error}")
 
+def is_bot_running(script_name):
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if script_name in ' '.join(proc.info['cmdline']):
+                return proc.info['pid'] != os.getpid()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return False
+
 def main():
+    if is_bot_running(__file__):
+        logger.error(f"Another instance of {__file__} is already running. Exiting.")
+        exit(1)
+
     try:
         app = Application.builder().token(BOT_TOKEN).build()
         app.bot_data["db_file"] = DB_FILE
