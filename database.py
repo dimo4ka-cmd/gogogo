@@ -18,7 +18,7 @@ class Database:
                           phone_number TEXT, status TEXT, timestamp INTEGER)''')
             c.execute('''CREATE TABLE IF NOT EXISTS archive
                          (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER,
-                          phone_number TEXT, status TEXT, timestamp INTEGER)''')
+                          phone_number TEXT, status TEXT, timestamp INTEGER  INTEGER)''')
             conn.commit()
 
     def add_user(self, chat_id, username, referral_code):
