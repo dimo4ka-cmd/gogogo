@@ -1,4 +1,4 @@
-rom telegram.ext import Application, CommandHandler, MessageHandler, Filters
+from telegram.ext import Application, CommandHandler, MessageHandler, Filters
 from config import BOT_TOKEN, DB_FILE, logger
 from handlers import start, handle_message, admin, reply, ban, stats
 
