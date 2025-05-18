@@ -40,7 +40,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMIN_IDS:
-        await update.message.reply_text("Не лезь сюда")
+        await update.message.reply_text("Доступно только администраторам.")
         return
 
     db = Database(context.bot_data["db_file"])
