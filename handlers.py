@@ -1,5 +1,6 @@
 import re
-from telegram import Update, TelegramError
+from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 from config import ADMIN_IDS, REFERRAL_CODE, QUEUE_LIMIT, NOTIFY_POSITION, PAYOUT_BOT_USERNAME, PAGE_SIZE, logger
 from database import Database
