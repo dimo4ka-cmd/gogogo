@@ -3,7 +3,7 @@ from config import PAGE_SIZE
 
 def user_panel():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📱 Добавить номер", callback_data="add_number")],
+        [InlineKeyboardButton("📱 Сдать номер", callback_data="add_number")],
         [InlineKeyboardButton("📋 Моя очередь", callback_data="queue_0")],
         [InlineKeyboardButton("🗂 Архив", callback_data="archive_0")],
         [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
@@ -14,11 +14,12 @@ def user_panel():
 
 def admin_panel():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Очередь", callback_data="admin_queue_0")],
+        [InlineKeyboardButton("📋 Очередь заявок", callback_data="admin_queue_0")],
         [InlineKeyboardButton("💰 Начислить баланс", callback_data="admin_balance")],
         [InlineKeyboardButton("⚙️ Обработать заявку", callback_data="admin_process")],
         [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton("👤 Управление пользователями", callback_data="admin_users")]
+        [InlineKeyboardButton("👤 Управление пользователями", callback_data="admin_users")],
+        [InlineKeyboardButton("💬 Ответить на вопрос", callback_data="admin_support_reply")]
     ])
 
 def cancel_button():
