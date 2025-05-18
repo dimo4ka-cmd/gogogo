@@ -1,11 +1,12 @@
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CallbackQueryHandler
+from telegram import Update
+from telegram.ext import ContextTypes
 from config import ADMIN_IDS, REFERRAL_CODE, QUEUE_LIMIT, NOTIFY_POSITION, PAYOUT_BOT_USERNAME, logger
 from database import Database
+from keyboards import user_panel, admin_panel, back_button, admin_back_button, process_buttons
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Введите реферальный код.")
+    await update.message.reply_text("Введите код для входа.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
@@ -26,16 +27,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Вы заблокированы.")
         return
 
+    if "awaiting_number" not in context.user_data:
+        await update.message.reply_text("Используйте кнопки для действий.", reply_markup=user_panel())
+        return
+
     if not re.match(r"^\+\d{10,15}$", text):
-        await update.message.reply_text("Номер должен быть в формате +1234567890.")
+        await update.message.reply_text("Номер должен быть в формате +1234567890.", reply_markup=back_button())
         return
 
     if db.get_user_queue_count(chat_id) >= QUEUE_LIMIT:
-        await update.message.reply_text(f"Лимит {QUEUE_LIMIT} номера в очереди.")
+        await update.message.reply_text(f"Лимит {QUEUE_LIMIT} номера в очереди.", reply_markup=back_button())
         return
 
     db.add_to_queue(chat_id, text)
-    await update.message.reply_text("Номер добавлен в очередь.")
+    context.user_data.pop("awaiting_number", None)
+    await update.message.reply_text("Номер добавлен в очередь.", reply_markup=user_panel())
     queue = db.get_queue()
     for i, entry in enumerate(queue):
         if i + 1 == NOTIFY_POSITION:
@@ -44,30 +50,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {chat_id} added number {text} to queue")
 
 async def show_user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("Очередь", callback_data="queue")],
-        [InlineKeyboardButton("Архив", callback_data="archive")],
-        [InlineKeyboardButton("Статистика", callback_data="stats")],
-        [InlineKeyboardButton("Вывести", callback_data="payout")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     balance = Database(context.bot_data["db_file"]).get_balance(update.effective_chat.id)
     text = f"Ваш баланс: ${balance:.2f}\nВыберите действие:"
     if update.callback_query:
-        await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
+        await update.callback_query.message.edit_text(text, reply_markup=user_panel())
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup)
+        await update.message.reply_text(text, reply_markup=user_panel())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     db = Database(context.bot_data["db_file"])
     chat_id = query.from_user.id
 
-    if query.data == "queue":
+    if query.data == "add_number":
+        context.user_data["awaiting_number"] = True
+        await query.message.edit_text("Отправьте номер в формате +1234567890.", reply_markup=back_button())
+
+    elif query.data == "queue":
         queue = db.get_queue()
         user_queue = [entry for entry in queue if entry[1] == chat_id]
         if not user_queue:
-            await query.message.edit_text("Ваша очередь пуста.\nОтправьте номер для добавления.", reply_markup=back_button())
+            await query.message.edit_text("Ваша очередь пуста.", reply_markup=back_button())
             return
         text = "Ваша очередь:\n"
         for i, entry in enumerate(queue):
@@ -82,7 +85,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         text = "Архив:\n"
         for entry in archive:
-            text += f"{entry[0]}: {entry[1]} ({entry[2].strftime('%Y-%m-%d')})\n"
+            text += f"{entry[0]}: {entry[1]} ({datetime.fromtimestamp(entry[2]).strftime('%Y-%m-%d')})\n"
         await query.message.edit_text(text, reply_markup=back_button())
 
     elif query.data == "stats":
@@ -102,97 +105,79 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await notify_admins(context, f"Заявка на выплату: Chat ID: {chat_id}, Сумма: ${balance:.2f}")
 
     elif query.data == "back":
+        context.user_data.pop("awaiting_number", None)
         await show_user_panel(update, context)
 
-async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id not in ADMI
-N_IDS:
-        await update.message.reply_text("Доступно только администраторам.")
-        return
-    await show_admin_panel(update, context)
-
-async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("Очередь", callback_data="admin_queue")],
-        [InlineKeyboardButton("Начислить баланс", callback_data="admin_balance")],
-        [InlineKeyboardButton("Обработать заявку", callback_data="admin_process")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    if update.callback_query:
-        await update.callback_query.message.edit_text("Админ-панель:", reply_markup=reply_markup)
-    else:
-        await update.message.reply_text("Админ-панель:", reply_markup=reply_markup)
-
-async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    db = Database(context.bot_data["db_file"])
-
-    if query.data == "admin_queue":
+    elif query.data == "admin_queue":
         queue = db.get_queue()
         if not queue:
-            await query.message.edit_text("Очередь пуста.", reply_markup=back_admin_button())
+            await query.message.edit_text("Очередь пуста.", reply_markup=admin_back_button())
             return
         text = "Очередь:\n"
         for i, entry in enumerate(queue):
             text += f"ID: {entry[0]}, Chat ID: {entry[1]}, Номер: {entry[2]}, Статус: {entry[3]}\n"
-        await query.message.edit_text(text, reply_markup=back_admin_button())
+        await query.message.edit_text(text, reply_markup=admin_back_button())
 
     elif query.data == "admin_balance":
-        await query.message.edit_text("Введите: /add_balance <chat_id> <сумма>", reply_markup=back_admin_button())
+        context.user_data["awaiting_balance"] = True
+        await query.message.edit_text("Отправьте: <chat_id> <сумма>", reply_markup=admin_back_button())
 
     elif query.data == "admin_process":
-        await query.message.edit_text("Введите: /process <queue_id> <status> (success/failed)", reply_markup=back_admin_button())
+        queue = db.get_queue()
+        if not queue:
+            await query.message.edit_text("Очередь пуста.", reply_markup=admin_back_button())
+            return
+        text = "Выберите заявку:\n"
+        for entry in queue:
+            text += f"ID: {entry[0]}, Номер: {entry[2]}\n"
+        await query.message.edit_text(text, reply_markup=process_buttons(queue[0][0]))
+
+    elif query.data.startswith("process_"):
+        status = query.data.split("_")[1]
+        queue_id = int(query.data.split("_")[2])
+        db.update_queue_status(queue_id, status)
+        queue = db.get_queue()
+        for i, entry in enumerate(queue):
+            if i + 1 == NOTIFY_POSITION:
+                await context.bot.send_message(entry[1], "Ваш номер скоро будет взят, подготовьтесь.")
+        await query.message.edit_text(f"Заявка {queue_id} обработана: {status}", reply_markup=admin_back_button())
+        logger.info(f"Admin processed queue ID {queue_id} as {status}")
 
     elif query.data == "admin_back":
         await show_admin_panel(update, context)
 
-async def add_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMIN_IDS:
         await update.message.reply_text("Доступно только администраторам.")
         return
-    args = context.args
+    if "awaiting_balance" not in context.user_data:
+        await update.message.reply_text("Используйте кнопки.", reply_markup=admin_panel())
+        return
+    args = update.message.text.split()
     if len(args) != 2:
-        await update.message.reply_text("Использование: /add_balance <chat_id> <сумма>")
+        await update.message.reply_text("Формат: <chat_id> <сумма>", reply_markup=admin_back_button())
         return
     try:
         chat_id = int(args[0])
         amount = float(args[1])
         db = Database(context.bot_data["db_file"])
         db.update_balance(chat_id, amount)
-        await update.message.reply_text(f"Баланс обновлён: Chat ID: {chat_id}, Сумма: ${amount:.2f}")
+        context.user_data.pop("awaiting_balance", None)
+        await update.message.reply_text(f"Баланс обновлён: Chat ID: {chat_id}, Сумма: ${amount:.2f}", reply_markup=admin_panel())
         await context.bot.send_message(chat_id, f"Ваш баланс пополнен на ${amount:.2f}")
         logger.info(f"Admin added ${amount:.2f} to {chat_id}")
     except Exception as e:
-        await update.message.reply_text(f"Ошибка: {str(e)}")
+        await update.message.reply_text(f"Ошибка: {str(e)}", reply_markup=admin_back_button())
 
-async def process_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMIN_IDS:
         await update.message.reply_text("Доступно только администраторам.")
         return
-    args = context.args
-    if len(args) != 2 or args[1] not in ["success", "failed"]:
-        await update.message.reply_text("Использование: /process <queue_id> <status> (success/failed)")
-        return
-    try:
-        queue_id = int(args[0])
-        status = args[1]
-        db = Database(context.bot_data["db_file"])
-        db.update_queue_status(queue_id, status)
-        queue = db.get_queue()
-        for i, entry in enumerate(queue):
-            if i + 1 == NOTIFY_POSITION:
-                await context.bot.send_message(entry[1], "Ваш номер скоро будет взят, подготовьтесь.")
-        await update.message.reply_text(f"Заявка {queue_id} обработана: {status}")
-        logger.info(f"Admin processed queue ID {queue_id} as {status}")
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {str(e)}")
+    if update.callback_query:
+        await update.callback_query.message.edit_text("Админ-панель:", reply_markup=admin_panel())
+    else:
+        await update.message.reply_text("Админ-панель:", reply_markup=admin_panel())
 
 async def notify_admins(context: ContextTypes.DEFAULT_TYPE, message: str):
     for admin_id in ADMIN_IDS:
         await context.bot.send_message(admin_id, message)
-
-def back_button():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Назад", callback_data="back")]])
-
-def back_admin_button():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Назад", callback_data="admin_back")]])
