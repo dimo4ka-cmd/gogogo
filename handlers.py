@@ -7,14 +7,15 @@ from keyboards import user_panel, admin_panel, cancel_button, admin_cancel_butto
 from datetime import datetime
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"User {update.effective_chat.id} initiated /start")
     await update.message.reply_text("Введите реферальный код для регистрации.")
-    logger.info("User initiated /start")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     text = update.message.text
     user = update.message.from_user
     db = Database(context.bot_data["db_file"])
+    logger.info(f"User {chat_id} sent message: {text}")
 
     user_data = db.get_user(chat_id)
     if not user_data:
@@ -107,20 +108,30 @@ async def show_user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = Database(context.bot_data["db_file"])
     balance = db.get_balance(update.effective_chat.id)
     text = f"Ваш баланс: ${balance:.2f}\nВыберите действие:"
-    if update.callback_query:
-        await update.callback_query.message.edit_text(text, reply_markup=user_panel())
-    else:
-        await update.message.reply_text(text, reply_markup=user_panel())
-    logger.info(f"User {update.effective_chat.id} opened user panel")
+    try:
+        if update.callback_query:
+            await update.callback_query.message.edit_text(text, reply_markup=user_panel())
+        else:
+            await update.message.reply_text(text, reply_markup=user_panel())
+        logger.info(f"User {update.effective_chat.id} opened user panel")
+    except Exception as e:
+        logger.error(f"Error showing user panel for {update.effective_chat.id}: {str(e)}")
+        if update.message:
+            await update.message.reply_text("Ошибка при открытии панели. Попробуйте снова.", reply_markup=user_panel())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    db = Database(context.bot_data["db_file"])
+    if not query:
+        logger.error("Received update without callback_query")
+        return
     chat_id = query.from_user.id
     callback_data = query.data
-    logger.info(f"User {chat_id} pressed button: {callback_data}")
+    logger.info(f"User {chat_id} pressed button with callback: {callback_data}")
 
     try:
+        await query.answer()  # Подтверждаем получение callback
+        db = Database(context.bot_data["db_file"])
+
         if callback_data == "add_number":
             context.user_data["awaiting_number"] = True
             await query.message.edit_text("Введите номер в формате +1234567890.", reply_markup=cancel_button())
@@ -301,15 +312,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Button handler error for {chat_id}, callback {callback_data}: {str(e)}")
 
 async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id not in ADMIN_IDS:
+    if update.message and update.message.from_user.id not in ADMIN_IDS:
         await update.message.reply_text("Доступно только администраторам.")
         logger.warning(f"Non-admin {update.message.from_user.id} attempted admin panel access")
         return
-    if update.callback_query:
-        await update.callback_query.message.edit_text("Админ-панель:", reply_markup=admin_panel())
-    else:
-        await update.message.reply_text("Админ-панель:", reply_markup=admin_panel())
-    logger.info(f"Admin {update.effective_chat.id} opened admin panel")
+    try:
+        if update.callback_query:
+            await update.callback_query.message.edit_text("Админ-панель:", reply_markup=admin_panel())
+        else:
+            await update.message.reply_text("Админ-панель:", reply_markup=admin_panel())
+        logger.info(f"Admin {update.effective_chat.id} opened admin panel")
+    except Exception as e:
+        logger.error(f"Error showing admin panel for {update.effective_chat.id}: {str(e)}")
+        if update.message:
+            await update.message.reply_text("Ошибка при открытии админ-панели. Попробуйте снова.", reply_markup=admin_panel())
 
 async def notify_admins(context: ContextTypes.DEFAULT_TYPE, message: str):
     for admin_id in ADMIN_IDS:
