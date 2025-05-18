@@ -1,5 +1,5 @@
 import re
-from telegram import Update
+from telegram import Update, TelegramError
 from telegram.ext import ContextTypes
 from config import ADMIN_IDS, REFERRAL_CODE, QUEUE_LIMIT, NOTIFY_POSITION, PAYOUT_BOT_USERNAME, PAGE_SIZE, logger
 from database import Database
@@ -25,7 +25,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"User {chat_id} entered invalid referral code: {text}")
                 return
             db.add_user(chat_id, user.username or user.first_name, text)
-            await show_user_panel(update, context)
+            await show_user_panel(update, context, new_message=True)
             logger.info(f"User {chat_id} registered with referral code")
             return
 
@@ -134,15 +134,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Произошла ошибка. Попробуйте снова.", reply_markup=user_panel())
         logger.error(f"Message handler error for {chat_id}: {str(e)}")
 
-async def show_user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, new_message=False):
     db = Database(context.bot_data["db_file"])
     balance = db.get_balance(update.effective_chat.id)
     text = f"Ваш баланс: ${balance:.2f}\nВыберите действие:"
     try:
-        if update.callback_query:
-            await update.callback_query.message.edit_text(text, reply_markup=user_panel())
-        else:
+        if new_message or not update.callback_query:
             await update.message.reply_text(text, reply_markup=user_panel())
+        else:
+            try:
+                await update.callback_query.message.edit_text(text, reply_markup=user_panel())
+            except TelegramError as e:
+                if "Message is not modified" in str(e):
+                    logger.debug(f"Skipped edit for user {update.effective_chat.id}: message not modified")
+                    await update.callback_query.answer()  # Подтверждаем callback без изменений
+                else:
+                    raise
         logger.info(f"User {update.effective_chat.id} opened user panel")
     except Exception as e:
         logger.error(f"Error showing user panel for {update.effective_chat.id}: {str(e)}")
@@ -171,39 +178,65 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             page = int(callback_data.split("_")[1])
             queue = db.get_queue(offset=page * PAGE_SIZE, limit=PAGE_SIZE)
             user_queue = [entry for entry in queue if entry[1] == chat_id]
-            if not user_queue:
-                await query.message.edit_text("Ваша очередь пуста.", reply_markup=pagination_buttons(page, db.get_queue_count(), "queue") or user_panel())
-                logger.info(f"User {chat_id} viewed empty queue")
-                return
             text = "Ваша очередь:\n"
-            for i, entry in enumerate(queue):
-                if entry[1] == chat_id:
-                    text += f"{i+1+page*PAGE_SIZE}. {entry[2]} ({entry[3]})\n"
-            await query.message.edit_text(text, reply_markup=pagination_buttons(page, db.get_queue_count(), "queue") or user_panel())
+            if not user_queue:
+                text = "Ваша очередь пуста."
+            else:
+                for i, entry in enumerate(queue):
+                    if entry[1] == chat_id:
+                        text += f"{i+1+page*PAGE_SIZE}. {entry[2]} (Статус: {entry[3]})\n"
+            try:
+                await query.message.edit_text(text, reply_markup=pagination_buttons(page, db.get_queue_count(), "queue") or user_panel())
+            except TelegramError as e:
+                if "Message is not modified" in str(e):
+                    logger.debug(f"Skipped queue edit for {chat_id}: message not modified")
+                    await query.answer()
+                else:
+                    raise
             logger.info(f"User {chat_id} viewed queue page {page}")
 
         elif callback_data.startswith("archive_"):
             page = int(callback_data.split("_")[1])
             archive = db.get_archive(chat_id, offset=page * PAGE_SIZE, limit=PAGE_SIZE)
-            if not archive:
-                await query.message.edit_text("Архив пуст.", reply_markup=pagination_buttons(page, db.get_archive_count(chat_id), "archive") or user_panel())
-                logger.info(f"User {chat_id} viewed empty archive")
-                return
             text = "Архив:\n"
-            for entry in archive:
-                text += f"{entry[0]}: {entry[1]} ({datetime.fromtimestamp(entry[2]).strftime('%Y-%m-%d')})\n"
-            await query.message.edit_text(text, reply_markup=pagination_buttons(page, db.get_archive_count(chat_id), "archive") or user_panel())
+            if not archive:
+                text = "Архив пуст."
+            else:
+                for entry in archive:
+                    text += f"{entry[0]}: {entry[1]} ({datetime.fromtimestamp(entry[2]).strftime('%Y-%m-%d')})\n"
+            try:
+                await query.message.edit_text(text, reply_markup=pagination_buttons(page, db.get_archive_count(chat_id), "archive") or user_panel())
+            except TelegramError as e:
+                if "Message is not modified" in str(e):
+                    logger.debug(f"Skipped archive edit for {chat_id}: message not modified")
+                    await query.answer()
+                else:
+                    raise
             logger.info(f"User {chat_id} viewed archive page {page}")
 
         elif callback_data == "stats":
             total_users, daily_submissions = db.get_stats()
             text = f"Статистика:\nУчастников: {total_users}\nСдано сегодня: {daily_submissions}"
-            await query.message.edit_text(text, reply_markup=user_panel())
+            try:
+                await query.message.edit_text(text, reply_markup=user_panel())
+            except TelegramError as e:
+                if "Message is not modified" in str(e):
+                    logger.debug(f"Skipped stats edit for {chat_id}: message not modified")
+                    await query.answer()
+                else:
+                    raise
             logger.info(f"User {chat_id} viewed stats")
 
         elif callback_data == "balance":
             balance = db.get_balance(chat_id)
-            await query.message.edit_text(f"Ваш баланс: ${balance:.2f}", reply_markup=user_panel())
+            try:
+                await query.message.edit_text(f"Ваш баланс: ${balance:.2f}", reply_markup=user_panel())
+            except TelegramError as e:
+                if "Message is not modified" in str(e):
+                    logger.debug(f"Skipped balance edit for {chat_id}: message not modified")
+                    await query.answer()
+                else:
+                    raise
             logger.info(f"User {chat_id} viewed balance")
 
         elif callback_data == "payout":
@@ -236,14 +269,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             page = int(callback_data.split("_")[2])
             queue = db.get_queue(offset=page * PAGE_SIZE, limit=PAGE_SIZE)
-            if not queue:
-                await query.message.edit_text("Очередь пуста.", reply_markup=pagination_buttons(page, db.get_queue_count(), "admin_queue") or admin_panel())
-                logger.info(f"Admin {chat_id} viewed empty queue")
-                return
             text = "Очередь заявок:\n"
-            for i, entry in enumerate(queue):
-                text += f"ID: {entry[0]}, Chat ID: {entry[1]}, Номер: {entry[2]}, Статус: {entry[3]}\n"
-            await query.message.edit_text(text, reply_markup=pagination_buttons(page, db.get_queue_count(), "admin_queue") or admin_panel())
+            if not queue:
+                text = "Очередь пуста."
+            else:
+                for i, entry in enumerate(queue):
+                    text += f"ID: {entry[0]}, Chat ID: {entry[1]}, Номер: {entry[2]}, Статус: {entry[3]}\n"
+            try:
+                await query.message.edit_text(text, reply_markup=pagination_buttons(page, db.get_queue_count(), "admin_queue") or admin_panel())
+            except TelegramError as e:
+                if "Message is not modified" in str(e):
+                    logger.debug(f"Skipped admin queue edit for {chat_id}: message not modified")
+                    await query.answer()
+                else:
+                    raise
             logger.info(f"Admin {chat_id} viewed queue page {page}")
 
         elif callback_data == "admin_balance":
@@ -277,7 +316,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             total_users, daily_submissions = db.get_stats()
             text = f"Статистика:\nУчастников: {total_users}\nСдано сегодня: {daily_submissions}"
-            await query.message.edit_text(text, reply_markup=admin_panel())
+            try:
+                await query.message.edit_text(text, reply_markup=admin_panel())
+            except TelegramError as e:
+                if "Message is not modified" in str(e):
+                    logger.debug(f"Skipped admin stats edit for {chat_id}: message not modified")
+                    await query.answer()
+                else:
+                    raise
             logger.info(f"Admin {chat_id} viewed stats")
 
         elif callback_data == "admin_users":
@@ -348,7 +394,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"User {chat_id} triggered unknown callback: {callback_data}")
 
     except Exception as e:
-        await query.message.edit_text("Произошла ошибка. Попробуйте снова.", reply_markup=user_panel())
+        await query.message.reply_text("Произошла ошибка. Попробуйте снова.", reply_markup=user_panel())
         logger.error(f"Button handler error for {chat_id}, callback {callback_data}: {str(e)}")
 
 async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -359,7 +405,14 @@ async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         text = "Админ-панель:"
         if update.callback_query:
-            await update.callback_query.message.edit_text(text, reply_markup=admin_panel())
+            try:
+                await update.callback_query.message.edit_text(text, reply_markup=admin_panel())
+            except TelegramError as e:
+                if "Message is not modified" in str(e):
+                    logger.debug(f"Skipped admin panel edit for {update.effective_chat.id}: message not modified")
+                    await update.callback_query.answer()
+                else:
+                    raise
         else:
             await update.message.reply_text(text, reply_markup=admin_panel())
         logger.info(f"Admin {update.effective_chat.id} opened admin panel")
