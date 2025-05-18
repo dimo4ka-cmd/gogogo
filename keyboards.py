@@ -37,9 +37,10 @@ def process_buttons(queue_id):
 
 def pagination_buttons(current_page, total_items, prefix):
     buttons = []
+    total_pages = (total_items + PAGE_SIZE - 1) // PAGE_SIZE
     if current_page > 0:
         buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"{prefix}_{current_page-1}"))
-    if (current_page + 1) * PAGE_SIZE < total_items:
+    if current_page < total_pages - 1:
         buttons.append(InlineKeyboardButton("Вперёд ➡️", callback_data=f"{prefix}_{current_page+1}"))
     return InlineKeyboardMarkup([buttons]) if buttons else None
 
