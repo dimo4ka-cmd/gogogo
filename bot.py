@@ -1,4 +1,4 @@
-from telegram.ext import Application, CommandHandler, MessageHandler, Filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from config import BOT_TOKEN, DB_FILE, logger
 from handlers import start, handle_message, admin, reply, ban, stats
 
@@ -14,7 +14,7 @@ def main():
     app.add_handler(CommandHandler("reply", reply))
     app.add_handler(CommandHandler("ban", ban))
     app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(error_handler)
 
     app.run_polling()
