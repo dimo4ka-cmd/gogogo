@@ -17,92 +17,122 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = Database(context.bot_data["db_file"])
     logger.info(f"User {chat_id} sent message: {text}")
 
-    user_data = db.get_user(chat_id)
-    if not user_data:
-        if text != REFERRAL_CODE:
-            await update.message.reply_text("Неверный реферальный код. Попробуйте снова.")
-            logger.warning(f"User {chat_id} entered invalid referral code: {text}")
-            return
-        db.add_user(chat_id, user.username or user.first_name, text)
-        await show_user_panel(update, context)
-        logger.info(f"User {chat_id} registered with referral code")
-        return
-
-    if user_data[4] == "banned":
-        await update.message.reply_text("Вы заблокированы.")
-        logger.info(f"Banned user {chat_id} attempted action")
-        return
-
-    if "awaiting_number" in context.user_data:
-        if not re.match(r"^\+\d{10,15}$", text):
-            await update.message.reply_text("Номер должен быть в формате +1234567890.", reply_markup=cancel_button())
-            logger.warning(f"User {chat_id} entered invalid number: {text}")
-            return
-        if db.get_user_queue_count(chat_id) >= QUEUE_LIMIT:
-            await update.message.reply_text(f"Лимит {QUEUE_LIMIT} номера в очереди.", reply_markup=cancel_button())
-            logger.info(f"User {chat_id} reached queue limit")
-            return
-        db.add_to_queue(chat_id, text)
-        context.user_data.clear()
-        await update.message.reply_text("Номер успешно добавлен в очередь.", reply_markup=user_panel())
-        queue = db.get_queue()
-        for i, entry in enumerate(queue):
-            if i + 1 == NOTIFY_POSITION:
-                await context.bot.send_message(entry[1], "Ваш номер скоро будет взят, подготовьтесь.")
-        await notify_admins(context, f"Новая заявка: Chat ID: {chat_id}, Номер: {text}")
-        logger.info(f"User {chat_id} added number {text} to queue")
-        return
-
-    if "awaiting_balance" in context.user_data and update.message.from_user.id in ADMIN_IDS:
-        args = text.split()
-        if len(args) != 2:
-            await update.message.reply_text("Формат: <chat_id> <сумма>", reply_markup=admin_cancel_button())
-            logger.warning(f"Admin {chat_id} entered invalid balance input: {text}")
-            return
-        try:
-            target_chat_id = int(args[0])
-            amount = float(args[1])
-            if amount <= 0:
-                await update.message.reply_text("Сумма должна быть положительной.", reply_markup=admin_cancel_button())
+    try:
+        user_data = db.get_user(chat_id)
+        if not user_data:
+            if text != REFERRAL_CODE:
+                await update.message.reply_text("Неверный реферальный код. Попробуйте снова.")
+                logger.warning(f"User {chat_id} entered invalid referral code: {text}")
                 return
-            db.update_balance(target_chat_id, amount)
-            context.user_data.clear()
-            await update.message.reply_text(f"Баланс обновлён: Chat ID: {target_chat_id}, Сумма: ${amount:.2f}", reply_markup=admin_panel())
-            await context.bot.send_message(target_chat_id, f"Ваш баланс пополнен на ${amount:.2f}")
-            logger.info(f"Admin added ${amount:.2f} to {target_chat_id}")
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка: {str(e)}", reply_markup=admin_cancel_button())
-            logger.error(f"Balance update error for {chat_id}: {str(e)}")
-        return
+            db.add_user(chat_id, user.username or user.first_name, text)
+            await show_user_panel(update, context)
+            logger.info(f"User {chat_id} registered with referral code")
+            return
 
-    if "awaiting_ban" in context.user_data and update.message.from_user.id in ADMIN_IDS:
-        try:
-            target_chat_id = int(text)
-            db.update_user_status(target_chat_id, "banned")
-            context.user_data.clear()
-            await update.message.reply_text(f"Пользователь {target_chat_id} заблокирован.", reply_markup=admin_panel())
-            await context.bot.send_message(target_chat_id, "Вы заблокированы.")
-            logger.info(f"User {target_chat_id} banned by admin")
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка: {str(e)}", reply_markup=admin_cancel_button())
-            logger.error(f"Ban error for {chat_id}: {str(e)}")
-        return
+        if user_data[4] == "banned":
+            await update.message.reply_text("Вы заблокированы.")
+            logger.info(f"Banned user {chat_id} attempted action")
+            return
 
-    if "awaiting_unban" in context.user_data and update.message.from_user.id in ADMIN_IDS:
-        try:
-            target_chat_id = int(text)
-            db.update_user_status(target_chat_id, "active")
+        if "awaiting_number" in context.user_data:
+            if not re.match(r"^\+\d{10,15}$", text):
+                await update.message.reply_text("Номер должен быть в формате +1234567890.", reply_markup=cancel_button())
+                logger.warning(f"User {chat_id} entered invalid number: {text}")
+                return
+            if db.get_user_queue_count(chat_id) >= QUEUE_LIMIT:
+                await update.message.reply_text(f"Лимит {QUEUE_LIMIT} номера в очереди.", reply_markup=cancel_button())
+                logger.info(f"User {chat_id} reached queue limit")
+                return
+            db.add_to_queue(chat_id, text)
             context.user_data.clear()
-            await update.message.reply_text(f"Пользователь {target_chat_id} разблокирован.", reply_markup=admin_panel())
-            await context.bot.send_message(target_chat_id, "Вы разблокированы.")
-            logger.info(f"User {target_chat_id} unbanned by admin")
-        except Exception as e:
-            await update.message.reply_text(f"Ошибка: {str(e)}", reply_markup=admin_cancel_button())
-            logger.error(f"Unban error for {chat_id}: {str(e)}")
-        return
+            await update.message.reply_text("Номер успешно добавлен в очередь.", reply_markup=user_panel())
+            queue = db.get_queue()
+            for i, entry in enumerate(queue):
+                if i + 1 == NOTIFY_POSITION:
+                    await context.bot.send_message(entry[1], "Ваш номер скоро будет взят, подготовьтесь.")
+            await notify_admins(context, f"Новая заявка на номер: Chat ID: {chat_id}, Номер: {text}")
+            logger.info(f"User {chat_id} added number {text} to queue")
+            return
 
-    await update.message.reply_text("Пожалуйста, используйте кнопки для действий.", reply_markup=user_panel())
-    logger.info(f"User {chat_id} sent unhandled message: {text}")
+        if "awaiting_support" in context.user_data:
+            await notify_admins(context, f"Вопрос от Chat ID: {chat_id}\n{text}")
+            context.user_data.clear()
+            await update.message.reply_text("Ваш вопрос отправлен в поддержку.", reply_markup=user_panel())
+            logger.info(f"User {chat_id} sent support question: {text}")
+            return
+
+        if "awaiting_balance" in context.user_data and update.message.from_user.id in ADMIN_IDS:
+            args = text.split()
+            if len(args) != 2:
+                await update.message.reply_text("Формат: <chat_id> <сумма>", reply_markup=admin_cancel_button())
+                logger.warning(f"Admin {chat_id} entered invalid balance input: {text}")
+                return
+            try:
+                target_chat_id = int(args[0])
+                amount = float(args[1])
+                if amount <= 0:
+                    await update.message.reply_text("Сумма должна быть положительной.", reply_markup=admin_cancel_button())
+                    return
+                db.update_balance(target_chat_id, amount)
+                context.user_data.clear()
+                await update.message.reply_text(f"Баланс обновлён: Chat ID: {target_chat_id}, Сумма: ${amount:.2f}", reply_markup=admin_panel())
+                await context.bot.send_message(target_chat_id, f"Ваш баланс пополнен на ${amount:.2f}")
+                logger.info(f"Admin added ${amount:.2f} to {target_chat_id}")
+            except ValueError:
+                await update.message.reply_text("Неверный формат. Пример: 123456789 10.50", reply_markup=admin_cancel_button())
+                logger.warning(f"Admin {chat_id} entered invalid balance format: {text}")
+            return
+
+        if "awaiting_ban" in context.user_data and update.message.from_user.id in ADMIN_IDS:
+            try:
+                target_chat_id = int(text)
+                db.update_user_status(target_chat_id, "banned")
+                context.user_data.clear()
+                await update.message.reply_text(f"Пользователь {target_chat_id} заблокирован.", reply_markup=admin_panel())
+                await context.bot.send_message(target_chat_id, "Вы заблокированы.")
+                logger.info(f"User {target_chat_id} banned by admin")
+            except ValueError:
+                await update.message.reply_text("Введите корректный chat_id.", reply_markup=admin_cancel_button())
+                logger.warning(f"Admin {chat_id} entered invalid ban chat_id: {text}")
+            return
+
+        if "awaiting_unban" in context.user_data and update.message.from_user.id in ADMIN_IDS:
+            try:
+                target_chat_id = int(text)
+                db.update_user_status(target_chat_id, "active")
+                context.user_data.clear()
+                await update.message.reply_text(f"Пользователь {target_chat_id} разблокирован.", reply_markup=admin_panel())
+                await context.bot.send_message(target_chat_id, "Вы разблокированы.")
+                logger.info(f"User {target_chat_id} unbanned by admin")
+            except ValueError:
+                await update.message.reply_text("Введите корректный chat_id.", reply_markup=admin_cancel_button())
+                logger.warning(f"Admin {chat_id} entered invalid unban chat_id: {text}")
+            return
+
+        if "awaiting_support_reply" in context.user_data and update.message.from_user.id in ADMIN_IDS:
+            args = text.split(maxsplit=1)
+            if len(args) != 2:
+                await update.message.reply_text("Формат: <chat_id> <сообщение>", reply_markup=admin_cancel_button())
+                logger.warning(f"Admin {chat_id} entered invalid support reply: {text}")
+                return
+            try:
+                target_chat_id = int(args[0])
+                message = args[1]
+                await context.bot.send_message(target_chat_id, f"Ответ от поддержки: {message}")
+                context.user_data.clear()
+                await update.message.reply_text(f"Ответ отправлен пользователю {target_chat_id}.", reply_markup=admin_panel())
+                logger.info(f"Admin {chat_id} replied to {target_chat_id}: {message}")
+            except ValueError:
+                await update.message.reply_text("Неверный chat_id.", reply_markup=admin_cancel_button())
+                logger.warning(f"Admin {chat_id} entered invalid support reply chat_id: {text}")
+            return
+
+        await update.message.reply_text("Пожалуйста, используйте кнопки для действий.", reply_markup=user_panel())
+        logger.info(f"User {chat_id} sent unhandled message: {text}")
+
+    except Exception as e:
+        await update.message.reply_text("Произошла ошибка. Попробуйте снова.", reply_markup=user_panel())
+        logger.error(f"Message handler error for {chat_id}: {str(e)}")
 
 async def show_user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = Database(context.bot_data["db_file"])
@@ -129,7 +159,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {chat_id} pressed button with callback: {callback_data}")
 
     try:
-        await query.answer()  # Подтверждаем получение callback
+        await query.answer()
         db = Database(context.bot_data["db_file"])
 
         if callback_data == "add_number":
@@ -190,8 +220,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"User {chat_id} requested payout: ${balance:.2f}")
 
         elif callback_data == "support":
-            await query.message.edit_text(f"Для поддержки перейдите в {PAYOUT_BOT_USERNAME}.", reply_markup=user_panel())
-            logger.info(f"User {chat_id} accessed support link")
+            context.user_data["awaiting_support"] = True
+            await query.message.edit_text("Введите ваш вопрос для поддержки.", reply_markup=cancel_button())
+            logger.info(f"User {chat_id} initiated support question")
 
         elif callback_data == "cancel":
             context.user_data.clear()
@@ -209,7 +240,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.edit_text("Очередь пуста.", reply_markup=pagination_buttons(page, db.get_queue_count(), "admin_queue") or admin_panel())
                 logger.info(f"Admin {chat_id} viewed empty queue")
                 return
-            text = "Очередь:\n"
+            text = "Очередь заявок:\n"
             for i, entry in enumerate(queue):
                 text += f"ID: {entry[0]}, Chat ID: {entry[1]}, Номер: {entry[2]}, Статус: {entry[3]}\n"
             await query.message.edit_text(text, reply_markup=pagination_buttons(page, db.get_queue_count(), "admin_queue") or admin_panel())
@@ -275,6 +306,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.edit_text("Введите: <chat_id>", reply_markup=admin_cancel_button())
             logger.info(f"Admin {chat_id} initiated unban")
 
+        elif callback_data == "admin_support_reply":
+            if query.from_user.id not in ADMIN_IDS:
+                await query.message.edit_text("Доступно только администраторам.")
+                logger.warning(f"Non-admin {chat_id} attempted admin action")
+                return
+            context.user_data["awaiting_support_reply"] = True
+            await query.message.edit_text("Введите: <chat_id> <сообщение>", reply_markup=admin_cancel_button())
+            logger.info(f"Admin {chat_id} initiated support reply")
+
         elif callback_data.startswith("process_"):
             if query.from_user.id not in ADMIN_IDS:
                 await query.message.edit_text("Доступно только администраторам.")
@@ -312,15 +352,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Button handler error for {chat_id}, callback {callback_data}: {str(e)}")
 
 async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and update.message.from_user.id not in ADMIN_IDS:
-        await update.message.reply_text("Доступно только администраторам.")
-        logger.warning(f"Non-admin {update.message.from_user.id} attempted admin panel access")
+    if (update.message and update.message.from_user.id not in ADMIN_IDS) or (update.callback_query and update.callback_query.from_user.id not in ADMIN_IDS):
+        await (update.message or update.callback_query.message).reply_text("Доступно только администраторам.")
+        logger.warning(f"Non-admin {update.effective_chat.id} attempted admin panel access")
         return
     try:
+        text = "Админ-панель:"
         if update.callback_query:
-            await update.callback_query.message.edit_text("Админ-панель:", reply_markup=admin_panel())
+            await update.callback_query.message.edit_text(text, reply_markup=admin_panel())
         else:
-            await update.message.reply_text("Админ-панель:", reply_markup=admin_panel())
+            await update.message.reply_text(text, reply_markup=admin_panel())
         logger.info(f"Admin {update.effective_chat.id} opened admin panel")
     except Exception as e:
         logger.error(f"Error showing admin panel for {update.effective_chat.id}: {str(e)}")
